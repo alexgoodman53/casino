@@ -53,6 +53,10 @@ flowchart TD
 ### 3.1. Provider Adapter
 
 ```ts
+/**
+ * Adapter отвечает только за protocol boundary:
+ * принимает HTTP-запрос провайдера, валидирует его и переводит во внутреннюю команду.
+ */
 export interface ProviderAdapter {
   providerCode: string;
 
@@ -62,6 +66,10 @@ export interface ProviderAdapter {
   formatError(error: EngineError): HttpResponse;
 }
 
+/**
+ * SlotegratorAdapter знает только transport и provider format.
+ * Денежной логики здесь быть не должно.
+ */
 export class SlotegratorAdapter implements ProviderAdapter {
   providerCode = "slotegrator";
 
@@ -70,7 +78,7 @@ export class SlotegratorAdapter implements ProviderAdapter {
   }
 
   parse(request: HttpRequest): ProviderCommand {
-    // action=balance|bet|win|refund|rollback -> internal command
+    // action=balance|bet|win|refund|rollback -> normalized command
     return {
       provider: "slotegrator",
       type: "bet",
@@ -92,6 +100,9 @@ export class SlotegratorAdapter implements ProviderAdapter {
   }
 }
 
+/**
+ * TreasurePruneAdapter делает ту же работу, но уже для JSON-based Treasure-prune API.
+ */
 export class TreasurePruneAdapter implements ProviderAdapter {
   providerCode = "treasure-prune";
 
@@ -125,6 +136,10 @@ export class TreasurePruneAdapter implements ProviderAdapter {
 ### 3.2. Provider Policy
 
 ```ts
+/**
+ * Policy хранит provider-specific правила, которые уже шире transport,
+ * но еще не должны попадать в общий engine.
+ */
 export interface ProviderPolicy {
   providerCode: string;
 
@@ -132,6 +147,9 @@ export interface ProviderPolicy {
   buildContext(command: ProviderCommand): ProviderContext;
 }
 
+/**
+ * В SlotegratorPolicy живут правила корреляции и operational profile.
+ */
 export class SlotegratorPolicy implements ProviderPolicy {
   providerCode = "slotegrator";
 
@@ -141,14 +159,20 @@ export class SlotegratorPolicy implements ProviderPolicy {
 
   buildContext(command: ProviderCommand): ProviderContext {
     return {
+      // По этому ключу engine проверяет duplicate и повторно отдает сохраненный результат.
       dedupeKey: `${command.provider}:${command.type}:${command.externalTransactionId}`,
+      // Для Slotegrator безопаснее матчить события прежде всего по round_id.
       roundMatchStrategy: "round_id-first",
+      // Refund может прийти раньше source bet, это нормальный сценарий.
       canArriveBeforeSource: command.type === "refund",
       callbackTimeoutSeconds: 3,
     };
   }
 }
 
+/**
+ * TreasurePrunePolicy задает recovery-семантику для stateful transaction flow.
+ */
 export class TreasurePrunePolicy implements ProviderPolicy {
   providerCode = "treasure-prune";
 
@@ -174,11 +198,18 @@ export class TreasurePrunePolicy implements ProviderPolicy {
 ### 3.3. Protocol Engine
 
 ```ts
+/**
+ * Engine реализует общую логику семейства протоколов.
+ * Именно здесь живут idempotency, orchestration и state transitions.
+ */
 export interface ProtocolEngine {
   kind: EngineKind;
   handle(command: ProviderCommand, context: ProviderContext): Promise<EngineResult>;
 }
 
+/**
+ * Общий engine для callback APIs в стиле seamless wallet.
+ */
 export class SeamlessWalletEngine implements ProtocolEngine {
   kind: EngineKind = "seamless-wallet";
 
@@ -191,10 +222,12 @@ export class SeamlessWalletEngine implements ProtocolEngine {
   ) {}
 
   async handle(command: ProviderCommand, context: ProviderContext): Promise<EngineResult> {
+    // Если этот запрос уже был обработан, деньги второй раз двигать нельзя.
     const duplicate = await this.inboxRepo.findProcessed(context.dedupeKey);
     if (duplicate) return duplicate.savedResult;
 
     if (command.type === "bet") {
+      // Сначала привязываем provider event к round, потом двигаем деньги.
       const round = await this.roundRepo.openOrAttach(command);
       const money = await this.core.applyBetDebit({
         playerId: command.playerId!,
@@ -204,6 +237,7 @@ export class SeamlessWalletEngine implements ProtocolEngine {
       });
 
       const result = { ok: true, balance: money.balance };
+      // Сохраняем и внешний эффект, и canonical response для duplicate replay.
       await this.txRepo.saveApplied(command, round, result);
       await this.inboxRepo.markProcessed(context.dedupeKey, result);
       return result;
@@ -213,6 +247,7 @@ export class SeamlessWalletEngine implements ProtocolEngine {
       const sourceBet = await this.txRepo.findSourceBet(command);
       if (!sourceBet) {
         const result = { ok: true, accepted: true };
+        // Важный case: refund пока не к чему привязать, поэтому кладем его в pending.
         await this.pendingRepo.save(command);
         await this.inboxRepo.markProcessed(context.dedupeKey, result);
         return result;
@@ -226,6 +261,7 @@ export class SeamlessWalletEngine implements ProtocolEngine {
       });
 
       const result = { ok: true, balance: money.balance };
+      // Refund уже привязан к source bet, теперь можно сохранить обратную связь.
       await this.txRepo.saveRefund(command, sourceBet, result);
       await this.inboxRepo.markProcessed(context.dedupeKey, result);
       return result;
@@ -235,6 +271,9 @@ export class SeamlessWalletEngine implements ProtocolEngine {
   }
 }
 
+/**
+ * Engine для провайдеров, где у внешней транзакции есть отдельный recovery lifecycle.
+ */
 export class StatefulTransactionEngine implements ProtocolEngine {
   kind: EngineKind = "stateful-transaction";
 
@@ -246,6 +285,7 @@ export class StatefulTransactionEngine implements ProtocolEngine {
   ) {}
 
   async handle(command: ProviderCommand, context: ProviderContext): Promise<EngineResult> {
+    // Одинаковое правило: duplicate не должен создавать второй money-effect.
     const duplicate = await this.inboxRepo.findProcessed(context.dedupeKey);
     if (duplicate) return duplicate.savedResult;
 
@@ -265,6 +305,7 @@ export class StatefulTransactionEngine implements ProtocolEngine {
     }
 
     if (command.type === "trx.complete") {
+      // complete должен обновлять судьбу внешней транзакции, а не заново списывать/начислять деньги.
       const source = await this.txRepo.findSourceTransaction(command);
       const result = { ok: true, completed: true, sourceId: source?.externalTransactionId };
       await this.txRepo.markCompleted(command, source, result);
@@ -280,11 +321,17 @@ export class StatefulTransactionEngine implements ProtocolEngine {
 ### 3.4. Integration Platform
 
 ```ts
+/**
+ * Inbox хранит dedupe key и canonical response, чтобы безопасно переживать retries.
+ */
 export interface IntegrationInboxRepository {
   findProcessed(dedupeKey: string): Promise<{ savedResult: EngineResult } | null>;
   markProcessed(dedupeKey: string, result: EngineResult): Promise<void>;
 }
 
+/**
+ * Репозиторий внешних транзакций хранит provider-side state и связи между событиями.
+ */
 export interface ExternalTransactionRepository {
   saveApplied(
     command: ProviderCommand,
@@ -307,10 +354,16 @@ export interface ExternalTransactionRepository {
   ): Promise<void>;
 }
 
+/**
+ * Репозиторий round mapping связывает внешние round/session ids с внутренним round казино.
+ */
 export interface ExternalRoundRepository {
   openOrAttach(command: ProviderCommand): Promise<ExternalRoundRecord>;
 }
 
+/**
+ * Pending operations нужны для отложенных или "осиротевших" событий.
+ */
 export interface PendingOperationRepository {
   save(command: ProviderCommand): Promise<void>;
 }
@@ -319,12 +372,18 @@ export interface PendingOperationRepository {
 ### 3.5. Casino Core
 
 ```ts
+/**
+ * Gateway скрывает от engine детали wallet/ledger реализации.
+ */
 export interface CasinoCoreGateway {
   applyBetDebit(input: ApplyBetDebitInput): Promise<MoneyResult>;
   applyWinCredit(input: ApplyWinCreditInput): Promise<MoneyResult>;
   applyRefund(input: ApplyRefundInput): Promise<MoneyResult>;
 }
 
+/**
+ * CasinoWalletService - упрощенный пример внутреннего денежного сервиса казино.
+ */
 export class CasinoWalletService implements CasinoCoreGateway {
   constructor(
     private walletRepo: WalletRepository,
@@ -333,6 +392,7 @@ export class CasinoWalletService implements CasinoCoreGateway {
   ) {}
 
   async applyBetDebit(input: ApplyBetDebitInput): Promise<MoneyResult> {
+    // Сначала пишем проводку, потом меняем баланс, потом обновляем round state.
     await this.ledgerRepo.insertDebit(input);
     const balance = await this.walletRepo.decrease(input.playerId, input.amount);
     await this.roundRepo.attachDebit(input.roundId, input.amount);
@@ -340,6 +400,7 @@ export class CasinoWalletService implements CasinoCoreGateway {
   }
 
   async applyWinCredit(input: ApplyWinCreditInput): Promise<MoneyResult> {
+    // Для выигрыша схема та же, но уже с credit entry.
     await this.ledgerRepo.insertCredit(input);
     const balance = await this.walletRepo.increase(input.playerId, input.amount);
     await this.roundRepo.attachCredit(input.roundId, input.amount);
@@ -347,6 +408,7 @@ export class CasinoWalletService implements CasinoCoreGateway {
   }
 
   async applyRefund(input: ApplyRefundInput): Promise<MoneyResult> {
+    // Refund должен оставить audit trail в ledger, а не просто поправить balance.
     await this.ledgerRepo.insertRefund(input);
     const balance = await this.walletRepo.increase(input.playerId, input.amount);
     await this.roundRepo.attachRefund(input.roundId, input.amount);
@@ -358,6 +420,10 @@ export class CasinoWalletService implements CasinoCoreGateway {
 ### 3.6. Application Facade
 
 ```ts
+/**
+ * ProviderRequestHandler - единая точка входа для callback/request flow.
+ * Он связывает adapter -> policy -> engine.
+ */
 export class ProviderRequestHandler {
   constructor(
     private adapters: Map<string, ProviderAdapter>,
@@ -369,12 +435,17 @@ export class ProviderRequestHandler {
     const adapter = this.adapters.get(providerCode)!;
     const policy = this.policies.get(providerCode)!;
 
+    // 1. Проверяем transport-level валидность запроса.
     adapter.verify(request);
+    // 2. Нормализуем raw provider payload.
     const command = adapter.parse(request);
+    // 3. Получаем provider-specific context для engine.
     const context = policy.buildContext(command);
     const engine = this.engines.get(policy.resolveEngine(command))!;
 
+    // 4. Передаем команду в общий protocol engine.
     const result = await engine.handle(command, context);
+    // 5. Формируем provider-specific response envelope.
     return adapter.formatSuccess(result);
   }
 }
