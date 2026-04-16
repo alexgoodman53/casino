@@ -1,6 +1,8 @@
 # API Treasure-prune
 
-> Первоисточник: [API](https://treasure-prune-f68.notion.site/API-4a13216644a44561abf7bde25ed462c0)
+> Источники:
+> - первоисточник: [API](https://treasure-prune-f68.notion.site/API-4a13216644a44561abf7bde25ed462c0)
+> - собранный source: [API_Treasure-prune_source.md](./API_Treasure-prune_source.md)
 
 ## Оглавление
 
