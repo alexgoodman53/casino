@@ -870,9 +870,9 @@ https://test.partners.casinomobule.com/games.start?partner.alias=somepartner&par
 
 ```mermaid
 flowchart LR
-    A["Партнер"] -->| "API Платформы" | B["Treasure-prune Платформа"]
-    B -->| "API Интеграции" | A
-    A -->| "games.start / games.startDemo" | C["Игрок запускает игру"]
+    A["Партнер"] -->|"API Платформы"| B["Treasure-prune Платформа"]
+    B -->|"API Интеграции"| A
+    A -->|"games.start / games.startDemo"| C["Игрок запускает игру"]
 ```
 
 ### 7.2. Базовый сценарий ставки и выигрыша
@@ -1079,4 +1079,3 @@ flowchart TD
 - полный список валют вынесен в отдельную ссылку.
 
 Но сама ссылка в исходнике отсутствует.
-
