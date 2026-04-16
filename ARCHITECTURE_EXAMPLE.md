@@ -54,8 +54,13 @@ flowchart TD
 
 ```ts
 /**
- * Adapter отвечает только за protocol boundary:
- * принимает HTTP-запрос провайдера, валидирует его и переводит во внутреннюю команду.
+ * Adapter - это самый внешний слой.
+ * Он принимает запрос от провайдера, проверяет его и превращает
+ * "сырой" HTTP payload в понятную внутреннюю команду.
+ *
+ * Важная мысль:
+ * adapter не решает, можно ли списывать деньги, делать refund или
+ * как обрабатывать дубли. Он только готовит данные для следующих слоев.
  */
 export interface ProviderAdapter {
   providerCode: string;
@@ -67,8 +72,14 @@ export interface ProviderAdapter {
 }
 
 /**
- * SlotegratorAdapter знает только transport и provider format.
- * Денежной логики здесь быть не должно.
+ * SlotegratorAdapter знает, как именно выглядит запрос Slotegrator.
+ *
+ * Он:
+ * - проверяет подпись;
+ * - читает поля из form-data;
+ * - собирает из них внутреннюю команду.
+ *
+ * Он не должен сам искать round, проверять duplicate или двигать деньги.
  */
 export class SlotegratorAdapter implements ProviderAdapter {
   providerCode = "slotegrator";
@@ -101,7 +112,10 @@ export class SlotegratorAdapter implements ProviderAdapter {
 }
 
 /**
- * TreasurePruneAdapter делает ту же работу, но уже для JSON-based Treasure-prune API.
+ * TreasurePruneAdapter делает ту же работу, но для Treasure-prune.
+ *
+ * Разница только в формате входящего запроса и в названиях полей.
+ * Смысл слоя остается тем же: принять запрос и подготовить команду.
  */
 export class TreasurePruneAdapter implements ProviderAdapter {
   providerCode = "treasure-prune";
@@ -137,8 +151,14 @@ export class TreasurePruneAdapter implements ProviderAdapter {
 
 ```ts
 /**
- * Policy хранит provider-specific правила, которые уже шире transport,
- * но еще не должны попадать в общий engine.
+ * Policy - это место для правил конкретного провайдера.
+ *
+ * Здесь мы держим то, что уже не похоже просто на "разбор запроса",
+ * но еще не должно раздувать общий engine.
+ *
+ * Проще говоря:
+ * policy отвечает на вопрос "как именно этот провайдер ожидает,
+ * что мы будем трактовать его события".
  */
 export interface ProviderPolicy {
   providerCode: string;
@@ -148,7 +168,12 @@ export interface ProviderPolicy {
 }
 
 /**
- * В SlotegratorPolicy живут правила корреляции и operational profile.
+ * В SlotegratorPolicy лежат простые правила работы именно со Slotegrator.
+ *
+ * Например:
+ * - как лучше искать нужный round;
+ * - можно ли принять событие раньше исходной ставки;
+ * - какой тайм-аут у callback-контура.
  */
 export class SlotegratorPolicy implements ProviderPolicy {
   providerCode = "slotegrator";
@@ -171,7 +196,10 @@ export class SlotegratorPolicy implements ProviderPolicy {
 }
 
 /**
- * TreasurePrunePolicy задает recovery-семантику для stateful transaction flow.
+ * TreasurePrunePolicy описывает, как Treasure-prune ведет себя при сбоях.
+ *
+ * Это важно, потому что этот провайдер не только шлет денежные события,
+ * но и отдельно управляет их дальнейшей судьбой через cancel/complete.
  */
 export class TreasurePrunePolicy implements ProviderPolicy {
   providerCode = "treasure-prune";
@@ -199,8 +227,16 @@ export class TreasurePrunePolicy implements ProviderPolicy {
 
 ```ts
 /**
- * Engine реализует общую логику семейства протоколов.
- * Именно здесь живут idempotency, orchestration и state transitions.
+ * Engine - это сердце обработки.
+ *
+ * Именно здесь живет общая бизнес-логика семейства протоколов:
+ * - защита от повторов;
+ * - порядок шагов;
+ * - работа с pending;
+ * - переходы состояний внешней транзакции.
+ *
+ * Если adapter отвечает за форму запроса,
+ * то engine отвечает уже за смысл обработки.
  */
 export interface ProtocolEngine {
   kind: EngineKind;
@@ -208,7 +244,11 @@ export interface ProtocolEngine {
 }
 
 /**
- * Общий engine для callback APIs в стиле seamless wallet.
+ * SeamlessWalletEngine подходит для провайдеров,
+ * которые ходят к нам за балансом, ставкой, выигрышем и refund.
+ *
+ * Он не знает конкретно Slotegrator или другого вендора.
+ * Он знает общий сценарий такого семейства API.
  */
 export class SeamlessWalletEngine implements ProtocolEngine {
   kind: EngineKind = "seamless-wallet";
@@ -272,7 +312,11 @@ export class SeamlessWalletEngine implements ProtocolEngine {
 }
 
 /**
- * Engine для провайдеров, где у внешней транзакции есть отдельный recovery lifecycle.
+ * StatefulTransactionEngine нужен там, где после основной денежной операции
+ * может прийти отдельная команда вроде complete или cancel.
+ *
+ * Его задача - помнить судьбу внешней транзакции и не двигать деньги повторно,
+ * если пришел recovery-вызов.
  */
 export class StatefulTransactionEngine implements ProtocolEngine {
   kind: EngineKind = "stateful-transaction";
@@ -322,7 +366,11 @@ export class StatefulTransactionEngine implements ProtocolEngine {
 
 ```ts
 /**
- * Inbox хранит dedupe key и canonical response, чтобы безопасно переживать retries.
+ * Inbox нужен, чтобы переживать повторы одного и того же запроса.
+ *
+ * Если провайдер прислал тот же callback еще раз,
+ * мы не должны второй раз списывать или начислять деньги.
+ * Вместо этого мы находим сохраненный результат и возвращаем его повторно.
  */
 export interface IntegrationInboxRepository {
   findProcessed(dedupeKey: string): Promise<{ savedResult: EngineResult } | null>;
@@ -330,7 +378,14 @@ export interface IntegrationInboxRepository {
 }
 
 /**
- * Репозиторий внешних транзакций хранит provider-side state и связи между событиями.
+ * Репозиторий внешних транзакций хранит все,
+ * что относится к внешним операциям провайдера.
+ *
+ * Здесь лежит ответ на вопросы:
+ * - была ли такая транзакция уже обработана;
+ * - к какому round она привязана;
+ * - в каком она состоянии;
+ * - есть ли у нее связанный refund, rollback или complete.
  */
 export interface ExternalTransactionRepository {
   saveApplied(
@@ -355,14 +410,22 @@ export interface ExternalTransactionRepository {
 }
 
 /**
- * Репозиторий round mapping связывает внешние round/session ids с внутренним round казино.
+ * Этот репозиторий связывает внешний round провайдера
+ * с внутренним round казино.
+ *
+ * Он нужен, чтобы разные provider ids в итоге вели в один и тот же
+ * внутренний игровой round.
  */
 export interface ExternalRoundRepository {
   openOrAttach(command: ProviderCommand): Promise<ExternalRoundRecord>;
 }
 
 /**
- * Pending operations нужны для отложенных или "осиротевших" событий.
+ * Pending operations нужны для событий,
+ * которые нельзя закончить сразу.
+ *
+ * Самый типичный пример:
+ * refund уже пришел, а исходная bet еще не найдена.
  */
 export interface PendingOperationRepository {
   save(command: ProviderCommand): Promise<void>;
@@ -373,7 +436,10 @@ export interface PendingOperationRepository {
 
 ```ts
 /**
- * Gateway скрывает от engine детали wallet/ledger реализации.
+ * Gateway отделяет engine от внутренней денежной реализации казино.
+ *
+ * Engine не должен знать, в какие именно таблицы пишет core
+ * и как именно обновляется баланс.
  */
 export interface CasinoCoreGateway {
   applyBetDebit(input: ApplyBetDebitInput): Promise<MoneyResult>;
@@ -382,7 +448,12 @@ export interface CasinoCoreGateway {
 }
 
 /**
- * CasinoWalletService - упрощенный пример внутреннего денежного сервиса казино.
+ * CasinoWalletService - простой пример внутреннего денежного сервиса.
+ *
+ * Он уже отвечает за реальные действия:
+ * - запись в ledger;
+ * - изменение баланса;
+ * - обновление round state.
  */
 export class CasinoWalletService implements CasinoCoreGateway {
   constructor(
@@ -421,8 +492,15 @@ export class CasinoWalletService implements CasinoCoreGateway {
 
 ```ts
 /**
- * ProviderRequestHandler - единая точка входа для callback/request flow.
- * Он связывает adapter -> policy -> engine.
+ * ProviderRequestHandler - это общий вход для запросов от провайдеров.
+ *
+ * Его задача очень простая:
+ * - выбрать нужный adapter;
+ * - выбрать нужную policy;
+ * - передать команду в нужный engine;
+ * - вернуть ответ обратно наружу.
+ *
+ * Благодаря этому контроллер на HTTP-уровне остается очень тонким.
  */
 export class ProviderRequestHandler {
   constructor(
@@ -602,6 +680,23 @@ create table pending_operations (
 );
 ```
 
+Что это за таблицы простым языком:
+
+- `providers`
+  Хранит список подключенных провайдеров. Нужна, чтобы не разбрасывать их коды и названия по коду и настройкам.
+- `provider_policies`
+  Хранит важные правила конкретного провайдера. Например, какой engine ему подходит, как лучше матчить round и какие функции у него вообще включены.
+- `integration_inbox`
+  Хранит уже принятые входящие запросы и результат их обработки. Это основная защита от повторного применения одной и той же операции.
+- `external_rounds`
+  Связывает внешний round провайдера с внутренним round казино. Без этой таблицы сложно корректно собирать события одного игрового раунда.
+- `external_transactions`
+  Главная таблица внешних операций. В ней видно, что именно пришло от провайдера, в каком состоянии это сейчас находится и какой ответ мы уже отдавали.
+- `external_transaction_links`
+  Нужна для связи операций между собой. Например, чтобы связать исходную ставку и пришедший позже `trx.complete` или `refund`.
+- `pending_operations`
+  Нужна для событий, которые пока нельзя закончить сразу. Например, если refund пришел раньше, чем найдена исходная bet.
+
 ### 5.2. Casino Core
 
 ```sql
@@ -628,6 +723,15 @@ create table rounds (
   status varchar(30) not null
 );
 ```
+
+Что это за таблицы простым языком:
+
+- `wallets`
+  Текущий баланс игрока. Это быстрый способ понять, сколько денег у него доступно прямо сейчас.
+- `ledger_entries`
+  История всех денежных движений. Это самая важная таблица для аудита и проверки, что деньги не были случайно применены дважды.
+- `rounds`
+  Внутренние игровые раунды казино. Нужны, чтобы группировать ставку, выигрыш, refund и другие действия внутри одного игрового цикла.
 
 ---
 
