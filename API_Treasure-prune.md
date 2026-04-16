@@ -57,17 +57,17 @@
 
 ```mermaid
 flowchart TD
-    A["Партнер подключается к платформе"] --> B["Использует API Платформы"]
+    A["Партнер"] --> B["Использует API Платформы"]
     A --> C["Реализует API Интеграции у себя"]
-    A --> D["Формирует ссылки запуска игр"]
-
+    A --> D["Формирует launch URL"]
     B --> E["Платформа возвращает список игр и служебные данные"]
-    D --> F["Игрок запускает игру"]
-    F --> G["Платформа обращается к API Интеграции партнера"]
-    G --> H["check.session / check.balance"]
-    G --> I["withdraw.bet / deposit.win"]
-    G --> J["trx.cancel / trx.complete"]
-    G --> K["freerounds.* / risk.step"]
+    D --> F["Игрок получает ссылку запуска"]
+    F --> G["Игрок открывает URL платформы"]
+    G --> H["Платформа обращается к API Интеграции партнера"]
+    H --> I["check.session / check.balance"]
+    H --> J["withdraw.bet / deposit.win"]
+    H --> K["trx.cancel / trx.complete"]
+    H --> L["freerounds.* / risk.step"]
 ```
 
 ### 2.2. Что важно в модели Treasure-prune
@@ -871,9 +871,20 @@ https://test.partners.casinomobule.com/games.start?partner.alias=somepartner&par
 ```mermaid
 flowchart LR
     A["Партнер"] -->|"API Платформы"| B["Treasure-prune Платформа"]
+    A -->|"Формирует ссылку запуска"| C["Игрок / браузер"]
+    C -->|"Открывает games.start / games.startDemo"| B
     B -->|"API Интеграции"| A
-    A -->|"games.start / games.startDemo"| C["Игрок запускает игру"]
 ```
+
+Правильная трактовка этой схемы по исходнику такая:
+
+1. Партнер обращается к платформе через `API Платформы`.
+2. Партнер формирует ссылку запуска игры.
+3. Игрок или браузер игрока открывает эту ссылку.
+4. Эта ссылка указывает на endpoint платформы:
+   - `games.startDemo`
+   - `games.start`
+5. Уже после запуска игры платформа вызывает `API Интеграции` на стороне партнера.
 
 ### 7.2. Базовый сценарий ставки и выигрыша
 
