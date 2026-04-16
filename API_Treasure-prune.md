@@ -91,6 +91,14 @@ flowchart TD
 
 Это означает, что в данном API важна не только сама денежная операция, но и ее судьба после таймаута, сетевой ошибки или неоднозначного ответа.
 
+Treasure-prune лучше описывать так:
+
+- по модели денег это `Seamless wallet / Single wallet`, потому что баланс игрока остается на стороне партнера;
+- по поведению транзакций это `Extended seamless` или `Recovery-aware seamless`, потому что кроме `withdraw.bet` и `deposit.win` есть отдельный lifecycle через `/trx.cancel` и `/trx.complete`;
+- кроме wallet-контура здесь отдельно присутствуют launch-, platform-, bonus- и risk-контуры.
+
+Именно поэтому Treasure-prune не стоит называть "третьим отдельным типом wallet API". Точнее считать его seamless-интеграцией с расширенным recovery-layer.
+
 ### 2.3. Важное различие между demo и real-money
 
 По исходнику demo и real-money запуск выглядят по-разному:

@@ -82,6 +82,16 @@ Slotegrator API работает по такой схеме:
 - деньги игрока живут у казино;
 - агрегатор обращается к казино при денежных событиях.
 
+Важно не смешивать здесь два разных уровня:
+
+- как **wallet-модель** Slotegrator относится к `Seamless wallet / Single wallet`;
+- как **полный набор API-контуров** Slotegrator включает не только money callbacks, но и каталог игр, launch flow, lobby, freespins, freevouchers и self validation.
+
+То есть Slotegrator нельзя описывать только одной фразой "это seamless API" без уточнения. Точнее так:
+
+- денежная модель у него `seamless wallet`;
+- рядом с ней есть отдельные launch-, catalog-, promo- и validation-контуры.
+
 Основание в PDF:
 
 - launch flow: стр. `5-6`

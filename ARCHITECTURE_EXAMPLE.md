@@ -74,6 +74,14 @@
 - `Protocol Engine`
   Это слой общей логики.
   Он уже не думает про конкретный HTTP-формат, но знает, как в целом обрабатывать семейство похожих API.
+  Важное уточнение:
+  engine нужен не на каждый endpoint и не на каждый "тип API" из вводной таблицы.
+  Он нужен на каждую **повторяемую модель обработки**, где есть общая orchestration-логика.
+  То есть:
+  - `SeamlessWalletEngine` обслуживает денежный runtime обычного seamless;
+  - `StatefulTransactionEngine` обслуживает recovery-aware runtime, где есть `cancel/complete`;
+  - `TransferWalletEngine` нужен только для transfer-модели с отдельным игровым кошельком;
+  - а `launch`, `catalog`, `auth` или `reporting` часто вообще обходятся без отдельного protocol engine и живут как более простые сервисы поверх adapter/policy.
   Его задача:
   - защититься от дублей;
   - решить, нужно ли открыть round;
