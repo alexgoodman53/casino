@@ -530,17 +530,14 @@ flowchart TD
 
 #### Какие семейства методов требуют отдельный движок
 
-| Семейство методов | Где реализуется основной контур | Нужен ли отдельный движок |
-| --- | --- | --- |
-| `Запуск игры` | `Adapter + Policy + прикладной сервис` | Обычно нет |
-| `Сессия и доступ` | `Adapter + Policy + прикладной сервис` | Обычно нет |
-| `Каталог и контент` | `Adapter + прикладной сервис` | Обычно нет |
-| `Деньги во время игры` в `Seamless` | `SeamlessWalletEngine` | Да |
-| `Деньги во время игры` в `Transfer` | `TransferWalletEngine` | Да |
-| `Управление спорной операцией` | `StatefulTransactionEngine` | Да |
-| `Промо и бонусы` | `PromoEngine` или `прикладной сервис` | Иногда |
-| `Отчеты и сверка` | `Adapter + сервис отчетов` | Обычно нет |
-| `Риск, тесты, тех. вызовы` | `Adapter + прикладной сервис` | Обычно нет |
+Обычно отдельный движок нужен только там, где есть повторяемая логика обработки и состояние между вызовами:
+
+- `SeamlessWalletEngine` для денежного потока в `Seamless`;
+- `StatefulTransactionEngine` для `cancel`, `complete` и похожих recovery-сценариев;
+- `TransferWalletEngine` для `Transfer`-модели;
+- `PromoEngine` только если бонусный контур действительно общий и сложный.
+
+Для `запуска игры`, `сессии`, `каталога`, `отчетов` и технических вызовов отдельный движок обычно не нужен.
 
 Итог по движкам:
 
@@ -552,10 +549,10 @@ flowchart TD
 
 | Что именно различается | Где это реализуется |
 | --- | --- |
-| `form-data` vs `JSON`, подпись, headers, response format | `Provider Adapter` |
-| demo-vs-real, matching round/session, optional методы, retry semantics | `Provider Policy` |
-| duplicate handling, pending, lifecycle операции, shared runtime-flow | `Protocol Engine` |
-| inbox, external transactions, links, pending, promo state | `Integration Platform` |
+| формат запроса, подпись, заголовки, формат ответа | `Provider Adapter` |
+| различие между demo и real, правила связи раунда и сессии, optional методы, поведение при повторах | `Provider Policy` |
+| обработка дублей, pending-состояния, жизненный цикл операции, общий поток обработки | `Protocol Engine` |
+| входящий журнал, внешние транзакции, связи между операциями, pending, состояние промо | `Integration Platform` |
 | баланс, проводки, внутренние раунды | `Casino Core` |
 
 Короткие примеры:
@@ -567,7 +564,7 @@ flowchart TD
   `Adapter` разбирает `/trx.complete`, `Policy` задает правило поиска исходной операции, `StatefulTransactionEngine` завершает внешний жизненный цикл, `Integration Platform` обновляет статус и связи, `Core` меняет деньги только при необходимости.
 
 - `games.startDemo`
-  `Adapter` собирает launch payload, `Policy` подсказывает особенности demo-потока, дальше работает обычный service-слой без отдельного движка.
+  `Adapter` собирает launch payload, `Policy` подсказывает особенности demo-потока, дальше работает обычный `Service Layer` без отдельного движка.
 
 ### 5.5. Как Treasure-prune и Slotegrator лягут в такую схему
 
