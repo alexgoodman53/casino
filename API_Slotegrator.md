@@ -1,6 +1,6 @@
 # API Slotegrator
 
-> Документ составлен **только** по PDF `GIS-API_Slotegrator 1.4.4.pdf`.
+> Документ составлен **только** по PDF [GIS-API_Slotegrator 1.4.4.pdf](./GIS-API_Slotegrator%201.4.4.pdf).
 >
 > Если в PDF нет достаточных данных для точного вывода, это **прямо помечено** в тексте как `Недостаточно данных в PDF`.
 
@@ -29,7 +29,7 @@
 
 Этот файл описывает API Slotegrator на русском языке по документу:
 
-- `GIS-API_Slotegrator 1.4.4.pdf`
+- [GIS-API_Slotegrator 1.4.4.pdf](./GIS-API_Slotegrator%201.4.4.pdf)
 
 Версия документа:
 
