@@ -2,7 +2,7 @@
 
 ## Оглавление
 
-- [1. Вводная: какие типы API у слот-агрегаторов встречаются на рынке](#1-вводная-какие-типы-api-у-слот-агрегаторов-встречаются-на-рынке)
+- [1. Вводная: какие модели API и семейства методов встречаются у слот-агрегаторов](#1-вводная-какие-модели-api-и-семейства-методов-встречаются-у-слот-агрегаторов)
 - [2. Treasure-prune API: как устроен подход](#2-treasure-prune-api-как-устроен-подход)
 - [3. Slotegrator API: как устроен подход](#3-slotegrator-api-как-устроен-подход)
 - [4. Ключевые различия Treasure-prune API и Slotegrator API](#4-ключевые-различия-treasure-prune-api-и-slotegrator-api)
@@ -18,173 +18,56 @@
 
 ---
 
-## 1. Вводная: какие типы API у слот-агрегаторов встречаются на рынке
+## 1. Вводная: какие модели API и семейства методов встречаются у слот-агрегаторов
 
 ### 1.1. Базовые wallet-модели
 
 Если говорить именно про **денежную модель интеграции**, то по открытым и подтверждаемым документациям базовых схем в основном две:
 
-| Тип | Где лежат деньги игрока | Как выглядит на практике | Что это значит для архитектуры |
+| Модель | Где лежат деньги игрока | Как выглядит на практике | Что это значит для архитектуры |
 | --- | --- | --- | --- |
 | `Seamless wallet` / `Single wallet` | Баланс игрока остается у казино | Провайдер или агрегатор вызывает `balance`, `bet/debit`, `win/credit`, `rollback/refund` | Нужны сильная идемпотентность, быстрые callbacks, единый ledger и хорошая обработка повторов |
 | `Transfer wallet` / `Multi wallet` | Часть средств временно живет во внешнем игровом кошельке | Помимо игровых событий появляются переводы между кошельками, reserve/transfer in/transfer out | Нужны отдельные сценарии пополнения игрового кошелька, возврата средств и сверки двух контуров |
 
 Важно: это именно **два базовых wallet-подхода**. Они описывают, где находятся деньги и кто двигает баланс во время игры.
 
-### 1.2. Важный подтип внутри seamless
+Отдельно внутри `Seamless` встречается более сложный вариант:
 
-Этот подтип удобно описывать так:
+- `Extended seamless`
+- `Recovery-aware seamless`
 
-- `Extended seamless`;
-- `Recovery-aware seamless`;
-- или внутренним инженерным названием `stateful seamless`, если хочется подчеркнуть длинный lifecycle транзакции.
+У этой модели:
 
-Но это не третий независимый wallet-тип на одном уровне с `Seamless` и `Transfer`. Это **подтип внутри seamless-модели**.
+- деньги все еще лежат у казино;
+- базовые методы похожи на `bet/debit` и `win/credit`;
+- но поверх них появляются методы отмены, дозавершения и других служебных шагов;
+- системе уже нужно помнить не только деньги, но и состояние внешней операции.
 
-Его признаки:
+Treasure-prune относится именно к такому варианту.
 
-- деньги по-прежнему лежат у казино;
-- базовые операции все еще похожи на `bet/debit` и `win/credit`;
-- поверх этого есть дополнительные команды управления судьбой операции после сбоя;
-- внешний контур может отдельно сказать "отмени ту операцию", "дозаверши ту операцию", "доиграй promo-шаг", "пройди служебный шаг риска".
+### 1.2. Какие семейства методов встречаются в этих моделях
 
-Примеры того, как это выглядит на практике:
+Кроме самих денежных методов у провайдеров обычно есть еще несколько **семейств методов**.
 
-- у Treasure-prune есть не только `withdraw.bet` и `deposit.win`, но и отдельные `trx.cancel` и `trx.complete`;
-- у некоторых seamless API встречаются отдельные `cancel`, `rollback`, promo- и service-методы;
-- для backend это означает, что нужно помнить не только сам факт денежного движения, но и дальнейшее состояние внешней транзакции.
-
-Именно поэтому такой API уже нельзя считать "простым stateless callback API". Он все еще seamless по модели денег, но требует более богатого слоя внешнего состояния.
-
-### 1.3. Другие типы API, которые часто идут рядом
-
-Если смотреть шире, то у слот-агрегаторов и игровых платформ есть не только wallet API. Рядом с ним обычно живут и другие семейства API.
-
-| Тип API | В рамках какой модели обычно живет | Для чего нужен | Как выглядит на практике |
+| Семейство методов | Где обычно встречается | Для чего нужно | Примеры |
 | --- | --- | --- | --- |
-| `Game Launch API` | И в `Seamless`, и в `Transfer` | Запуск игры, получение launch URL, demo/real-money entrypoint | `games.start`, `games.startDemo`, `get game URL`, `direct-to-lobby` |
-| `Session / Auth / Verify API` | И в `Seamless`, и в `Transfer` | Проверка сессии игрока, токена, доступа к игре | `check.session`, `verify player`, token exchange, session validation |
-| `Catalog / Content API` | И в `Seamless`, и в `Transfer` | Получение списка игр, провайдеров, категорий, метаданных | `games.list`, content catalog, provider/game metadata |
-| `Wallet / Transaction API` | В любой wallet-модели, но особенно важен для `Seamless` | Денежные события во время игры | `balance`, `bet`, `win`, `refund`, `withdraw.bet`, `deposit.win` |
-| `Recovery / Transaction State API` | Чаще всего в `Extended / Recovery-aware seamless`, реже в других моделях | Отмена, дозавершение и управление судьбой спорной транзакции | `cancel`, `rollback`, `trx.cancel`, `trx.complete` |
-| `Bonus / Promo API` | Может жить и в `Seamless`, и в `Transfer` как отдельный контур поверх основной wallet-модели | Free rounds, бонусные кампании, активация и завершение промо-сценариев | `freerounds.*`, bonus lifecycle, campaign steps |
-| `Reporting / Query / Reconciliation API` | Обычно отдельный служебный контур, не равен wallet-модели | Сверка, поиск транзакций, отчеты, повторная проверка статуса | transaction lookup, reports, reconciliation endpoints |
-| `Risk / Regulatory / Testing API` | Обычно отдельный служебный контур, не равен wallet-модели | Отдельные технические и compliance-сценарии | `risk.step`, testing API, regulatory API, service callbacks |
+| `Запуск игры` | И в `Seamless`, и в `Transfer` | Получить ссылку запуска, разделить demo и real-money поток | `games.start`, `games.startDemo`, `get game URL`, `direct-to-lobby` |
+| `Сессия и доступ` | И в `Seamless`, и в `Transfer` | Проверить сессию, токен, право доступа к игре | `check.session`, `verify player`, token exchange |
+| `Каталог и контент` | И в `Seamless`, и в `Transfer` | Получить список игр, провайдеров, тегов, метаданных | `games.list`, catalog, game metadata |
+| `Деньги во время игры` | В любой денежной модели | Списать ставку, начислить выигрыш, вернуть средства | `balance`, `bet`, `win`, `refund`, `withdraw.bet`, `deposit.win` |
+| `Управление спорной операцией` | Чаще в расширенном `Seamless` | Отменить, дозавершить или отдельно обработать спорную транзакцию | `cancel`, `rollback`, `trx.cancel`, `trx.complete` |
+| `Промо и бонусы` | Может быть и в `Seamless`, и в `Transfer` | Фриспины, бонусные шаги, активация и завершение кампаний | `freerounds.*`, promo methods |
+| `Отчеты и сверка` | Обычно отдельный служебный контур | Найти транзакцию, собрать отчет, провести сверку | transaction lookup, reports, reconciliation |
+| `Риск, тесты, тех. вызовы` | Обычно отдельный служебный контур | Технические шаги, тестовые вызовы, compliance-сценарии | `risk.step`, testing, regulatory callbacks |
 
-Это важно для архитектуры, потому что фраза "тип API" может означать две разные вещи:
+Важно:
 
-- **тип wallet-модели**, то есть где лежат деньги;
-- **тип функционального контура**, то есть для чего вообще нужен набор методов.
+- это **не отдельные модели API**;
+- это именно **семейства методов**, которые встречаются внутри разных моделей.
 
-Для архитектуры удобно использовать такую схему:
+### 1.3. Кратко о сути базовых подходов
 
-- как базовые wallet-модели рассматриваются `Seamless` и `Transfer`;
-- `Extended / Recovery-aware seamless` считается подтипом внутри `Seamless`;
-- launch, auth, catalog, bonus, reporting и risk считаются соседними API-контурами, а не отдельными wallet-моделями.
-
-### 1.3.1. Как это связано с engine-слоем
-
-Здесь легко запутаться, потому что таблица выше показывает **типы API-контуров**, а `engine` нужен не для каждого такого контура отдельно.
-
-Правильнее думать так:
-
-- `wallet model` отвечает на вопрос, **как в целом двигаются деньги**;
-- `API type` отвечает на вопрос, **для чего нужен конкретный набор методов**;
-- `protocol engine` отвечает на вопрос, **какую общую runtime-логику надо переиспользовать между похожими провайдерами**.
-
-То есть engine обычно привязан не к строке таблицы `Game Launch API` или `Catalog API`, а к **семейству обработки**.
-
-На практике это выглядит так:
-
-- для обычного `Seamless wallet` нужен общий `SeamlessWalletEngine`;
-- для `Extended / Recovery-aware seamless` нужен `StatefulTransactionEngine` или другой recovery-aware engine;
-- для `Transfer wallet` при такой интеграции обычно нужен свой `TransferWalletEngine`;
-- для `Bonus / Promo API` отдельный `PromoEngine` нужен только если promo-контур сам по себе stateful и имеет общий lifecycle;
-- для `Game Launch`, `Catalog`, `Auth`, `Reporting` отдельный protocol engine часто вообще не нужен: там обычно хватает `adapter + policy + application service`.
-
-Коротко:
-
-- engine нужен **не для каждого типа API**;
-- engine нужен **для каждой повторяемой модели обработки**, где есть shared orchestration, state transitions, idempotency и общие инварианты;
-- один и тот же провайдер может использовать сразу несколько контуров API, но только часть из них реально требует отдельный engine.
-
-### 1.3.2. Таблица соответствия: какой тип API в какой engine ложится
-
-| Тип API | Нужен ли отдельный protocol engine | В какой engine обычно ложится | Комментарий |
-| --- | --- | --- | --- |
-| `Game Launch API` | Обычно нет | Отдельный engine обычно не нужен | Чаще всего хватает `adapter + policy + application service`, потому что здесь нет тяжелого денежного lifecycle |
-| `Session / Auth / Verify API` | Обычно нет | Отдельный engine обычно не нужен | Это проверка доступа и сессии, а не самостоятельная модель orchestration |
-| `Catalog / Content API` | Обычно нет | Отдельный engine обычно не нужен | Это контентный и справочный контур |
-| `Wallet / Transaction API` в `Seamless` | Да | `SeamlessWalletEngine` | Основной runtime списаний, начислений, refund и duplicate-handling |
-| `Wallet / Transaction API` в `Transfer` | Да | `TransferWalletEngine` | Нужен там, где есть отдельный игровой кошелек и переводы между контурами |
-| `Recovery / Transaction State API` в `Extended / Recovery-aware seamless` | Да | `StatefulTransactionEngine` | Нужен для `cancel`, `complete`, delayed finalization и recovery-lifecycle |
-| `Bonus / Promo API` | Иногда | `PromoEngine` | Нужен только если promo-контур stateful и имеет общий lifecycle, retries и завершение шагов |
-| `Reporting / Query / Reconciliation API` | Обычно нет | Отдельный engine обычно не нужен | Часто это отдельные query/reporting services |
-| `Risk / Regulatory / Testing API` | Обычно нет | Отдельный engine обычно не нужен | Чаще это service-level обработка, а не денежный orchestration engine |
-
-### 1.3.3. Сколько движков нужно на всю платформу
-
-Если смотреть на весь набор семейств API целиком, то обычно нужен не набор из 8-10 движков, а **3 базовых engine и 1 дополнительный optional engine**.
-
-| Engine | Когда нужен | Какие типы API покрывает | Нужен ли уже сейчас |
-| --- | --- | --- | --- |
-| `SeamlessWalletEngine` | Когда деньги игрока живут у казино, а провайдер ходит за `balance/bet/win/refund/rollback` | `Wallet / Transaction API` в `Seamless` | Да |
-| `StatefulTransactionEngine` | Когда поверх обычного seamless есть отдельный recovery-lifecycle | `Recovery / Transaction State API` и связанный money-flow в `Extended / Recovery-aware seamless` | Да |
-| `TransferWalletEngine` | Когда появится интеграция с отдельным игровым кошельком или transfer-flow | `Wallet / Transaction API` в `Transfer` | Не для текущих 2 API, но нужен как отдельное семейство в целевой архитектуре |
-| `PromoEngine` | Когда бонусный контур станет общим, stateful и повторяемым между несколькими провайдерами | `Bonus / Promo API` | Опционально |
-
-Итоговая практическая формула:
-
-- для текущего набора из `Treasure-prune` и `Slotegrator` достаточно **2 engine**: `SeamlessWalletEngine` и `StatefulTransactionEngine`;
-- для целевой платформы под разные семейства API разумно закладывать **3 основных engine**: `SeamlessWalletEngine`, `StatefulTransactionEngine`, `TransferWalletEngine`;
-- `PromoEngine` стоит добавлять только тогда, когда бонусный контур действительно становится общим и достаточно сложным, а не “на всякий случай”.
-
-### 1.3.4. Как реализовывать разные типы API и их нюансы в нашей схеме
-
-Ниже главное правило проектирования:
-
-- **формат и transport** кладем в `Provider Adapter`;
-- **семантику конкретного провайдера** кладем в `Provider Policy`;
-- **повторяемую runtime-логику** кладем в `Protocol Engine`;
-- **внешнее состояние и связи** кладем в `Integration Platform`;
-- **деньги и ledger** оставляем в `Casino Core`.
-
-То есть разница между API не должна целиком жить "в адаптере" или "в движке". Она раскладывается по слоям по смыслу.
-
-| Тип API | Где реализуется основной контур | Где живут нюансы этого API | Что обычно не нужно тащить в engine |
-| --- | --- | --- | --- |
-| `Game Launch API` | `Adapter + Policy + Application Service` | launch-параметры, demo/real-money branch, lobby/direct flow, token composition | idempotent money orchestration и ledger-логика |
-| `Session / Auth / Verify API` | `Adapter + Policy + Application Service` | session lookup, token validation, TTL, mapping player/session/provider session | отдельный protocol engine, если нет сложного общего lifecycle |
-| `Catalog / Content API` | `Adapter + Application Service` | фильтры, категории, локализация, provider/game metadata | engine и integration state machine |
-| `Wallet / Transaction API` в `Seamless` | `SeamlessWalletEngine` | dedupe, round open/close, refund-before-bet, duplicate replay, batch rollback нюансы через `Policy` | transport-парсинг и provider-specific field mapping |
-| `Wallet / Transaction API` в `Transfer` | `TransferWalletEngine` | transfer in/out, reserve/release, wallet sync, reconciliation rules через `Policy` | launch/catalog/auth детали |
-| `Recovery / Transaction State API` | `StatefulTransactionEngine` | `cancel`, `complete`, delayed finalization, retry semantics, container methods и matching rules через `Policy` | базовый launch/auth flow |
-| `Bonus / Promo API` | `PromoEngine` или `Application Service` | activation, completion, step-by-step promo state, feature flags, provider-specific promo mapping | отдельный engine, если promo-контур простой и не общий |
-| `Reporting / Query / Reconciliation API` | `Adapter + Query/Reporting Service` | transaction lookup, reconciliation views, export format, reporting filters | money runtime engine |
-| `Risk / Regulatory / Testing API` | `Adapter + Service Layer` | risk steps, testing callbacks, compliance payloads, certification flows | wallet engine, если эти вызовы не двигают деньги |
-
-Практически это означает следующее:
-
-- если различие в том, **как пришел запрос**, это `Adapter`;
-- если различие в том, **как понимать поведение этого провайдера**, это `Policy`;
-- если различие в том, **как живет вся операция во времени**, это `Engine`;
-- если различие в том, **что надо помнить между вызовами**, это `Integration Platform`;
-- если речь о **списании, начислении, refund и ledger**, это `Casino Core`.
-
-Короткие примеры:
-
-- `Slotegrator refund before bet`
-  `Adapter` парсит `action=refund`, `Policy` говорит, что такой порядок допустим, `SeamlessWalletEngine` кладет событие в `pending_operations`, `Integration Platform` хранит pending и link, `Core` деньги повторно не двигает.
-
-- `Treasure-prune trx.complete`
-  `Adapter` парсит контейнерный `/trx.complete`, `Policy` объясняет matching rule и recovery semantics, `StatefulTransactionEngine` ищет исходную внешнюю транзакцию и завершает lifecycle, `Integration Platform` обновляет внешний статус и связи, `Core` меняет деньги только если это действительно нужно.
-
-- `games.startDemo`
-  `Adapter` собирает launch payload, `Policy` подсказывает demo-vs-real distinction и provider-specific launch flags, дальше работает обычный service-слой без отдельного protocol engine.
-
-### 1.5. Кратко о сути базовых подходов
-
-#### 1.5.1. Seamless wallet
+#### 1.3.1. Seamless wallet
 
 Это самый привычный вариант.
 
@@ -204,7 +87,7 @@
 - повышаются требования к надежности callback-обработки;
 - при сбоях приходится хорошо обрабатывать повторы, rollback и несинхронность событий.
 
-#### 1.5.2. Transfer wallet
+#### 1.3.2. Transfer wallet
 
 Это более тяжелая схема.
 
@@ -223,7 +106,7 @@
 - сложнее возвраты;
 - выше риск расхождений между основным балансом казино и игровым балансом.
 
-#### 1.5.3. Extended / recovery-aware seamless
+#### 1.3.3. Extended / recovery-aware seamless
 
 Это не отдельная модель хранения денег, а **усложненный вариант seamless-интеграции**.
 
@@ -233,7 +116,7 @@
 
 Это именно тот случай, куда относится Treasure-prune API.
 
-### 1.6. Что подтверждается документами
+### 1.4. Что подтверждается документами
 
 По открытым документациям хорошо подтверждаются такие выводы:
 
@@ -247,7 +130,7 @@
 - если обсуждаем **деньги**, то базовых моделей в первую очередь две: `Seamless` и `Transfer`;
 - если обсуждаем **полный интеграционный ландшафт**, то рядом с wallet API почти всегда есть и другие семейства методов.
 
-### 1.7. Как читать этот документ
+### 1.5. Как читать этот документ
 
 Связанные документы:
 
@@ -681,7 +564,7 @@ flowchart TD
 Идея здесь такая:
 
 - у 20-40 API будет не 20-40 фундаментально разных жизненных циклов;
-- чаще они разложатся на 3 основных engine и 1 optional `PromoEngine`, плюс несколько более простых service-контуров без отдельного движка;
+- чаще они разложатся на 3 основных движка и 1 дополнительный `PromoEngine`, плюс несколько более простых контуров без отдельного движка;
 - новый адаптер должен подключаться к уже существующему движку.
 
 #### Слой 4. Provider Policies
@@ -708,7 +591,62 @@ flowchart TD
 - преобразование полей;
 - преобразование ответа обратно.
 
-### 5.4. Как Treasure-prune и Slotegrator лягут в такую схему
+### 5.4. Как модели и семейства методов ложатся на слои
+
+Здесь уже можно говорить про движки и раскладку по слоям.
+
+Главное правило такое:
+
+- **формат запроса и ответа** лежит в `Provider Adapter`;
+- **нюансы конкретного провайдера** лежат в `Provider Policy`;
+- **повторяемая логика обработки** лежит в `Protocol Engine`;
+- **внешнее состояние и связи** лежат в `Integration Platform`;
+- **списание, начисление и ledger** лежат в `Casino Core`.
+
+То есть разница между API не должна целиком жить "в адаптере" или "в движке". Она делится по смыслу.
+
+#### Какие семейства методов требуют отдельный движок
+
+| Семейство методов | Где реализуется основной контур | Нужен ли отдельный движок |
+| --- | --- | --- |
+| `Запуск игры` | `Adapter + Policy + прикладной сервис` | Обычно нет |
+| `Сессия и доступ` | `Adapter + Policy + прикладной сервис` | Обычно нет |
+| `Каталог и контент` | `Adapter + прикладной сервис` | Обычно нет |
+| `Деньги во время игры` в `Seamless` | `SeamlessWalletEngine` | Да |
+| `Деньги во время игры` в `Transfer` | `TransferWalletEngine` | Да |
+| `Управление спорной операцией` | `StatefulTransactionEngine` | Да |
+| `Промо и бонусы` | `PromoEngine` или `прикладной сервис` | Иногда |
+| `Отчеты и сверка` | `Adapter + сервис отчетов` | Обычно нет |
+| `Риск, тесты, тех. вызовы` | `Adapter + прикладной сервис` | Обычно нет |
+
+Итог по движкам:
+
+- для `Slotegrator + Treasure-prune` достаточно `2` движков: `SeamlessWalletEngine` и `StatefulTransactionEngine`;
+- для целевой платформы разумно держать `3` основных движка: `SeamlessWalletEngine`, `StatefulTransactionEngine`, `TransferWalletEngine`;
+- `PromoEngine` стоит добавлять только если бонусный контур реально становится общим и сложным.
+
+#### Где должны жить нюансы конкретного API
+
+| Что именно различается | Где это реализуется |
+| --- | --- |
+| `form-data` vs `JSON`, подпись, headers, response format | `Provider Adapter` |
+| demo-vs-real, matching round/session, optional методы, retry semantics | `Provider Policy` |
+| duplicate handling, pending, lifecycle операции, shared runtime-flow | `Protocol Engine` |
+| inbox, external transactions, links, pending, promo state | `Integration Platform` |
+| баланс, проводки, внутренние раунды | `Casino Core` |
+
+Короткие примеры:
+
+- `Slotegrator refund before bet`
+  `Adapter` парсит `action=refund`, `Policy` разрешает такой порядок, `SeamlessWalletEngine` кладет событие в `pending_operations`, `Integration Platform` хранит ожидание и связь, `Core` не двигает деньги второй раз.
+
+- `Treasure-prune trx.complete`
+  `Adapter` разбирает `/trx.complete`, `Policy` задает правило поиска исходной операции, `StatefulTransactionEngine` завершает внешний жизненный цикл, `Integration Platform` обновляет статус и связи, `Core` меняет деньги только при необходимости.
+
+- `games.startDemo`
+  `Adapter` собирает launch payload, `Policy` подсказывает особенности demo-потока, дальше работает обычный service-слой без отдельного движка.
+
+### 5.5. Как Treasure-prune и Slotegrator лягут в такую схему
 
 #### Treasure-prune API
 
